@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 输送机仿真沙盒</title>
+    <!-- 引入 Tailwind CSS 用于快速构建美观的界面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111827; }
+        canvas { 
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+            background-color: #ffffff;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+        .tool-btn { transition: all 0.2s; }
+        .tool-btn.active { background-color: #3b82f6; color: white; border-color: #3b82f6; }
+        .kbd { display: inline-block; padding: 1px 5px; font-size: 10px; font-family: monospace; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 3px; color: #374151; }
+    </style>
+</head>
+<body class="flex h-screen text-gray-800 font-sans">
+
+    <!-- 左侧工具栏 -->
+    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col z-10 shadow-lg">
+        <div class="p-5 border-b border-gray-200">
+            <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                物流仿真沙盒
+            </h1>
+            <p class="text-xs text-gray-500 mt-1">纯 Canvas 2D 渲染引擎</p>
+        </div>
+
+        <div class="p-5 flex-1 overflow-y-auto">
+            <h2 class="text-sm font-semibold text-gray-500 mb-3">建设工具 (拖拽铺设)</h2>
+            <div class="grid grid-cols-2 gap-2 mb-6">
+                <button class="tool-btn active flex flex-col items-center justify-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="conveyor-1">
+                    <span class="text-xl">➡️</span>
+                    <span class="text-xs mt-1">向右输送</span>
+                </button>
+                <button class="tool-btn flex flex-col items-center justify-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="conveyor-2">
+                    <span class="text-xl">⬇️</span>
+                    <span class="text-xs mt-1">向下输送</span>
+                </button>
+                <button class="tool-btn flex flex-col items-center justify-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="conveyor-3">
+                    <span class="text-xl">⬅️</span>
+                    <span class="text-xs mt-1">向左输送</span>
+                </button>
+                <button class="tool-btn flex flex-col items-center justify-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="conveyor-4">
+                    <span class="text-xl">⬆️</span>
+                    <span class="text-xs mt-1">向上输送</span>
+                </button>
+                <button class="tool-btn flex flex-col items-center justify-center p-3 border border-cyan-100 rounded-lg hover:bg-cyan-50 col-span-2" data-tool="diverter">
+                    <span class="text-xl">🔀</span>
+                    <span class="text-xs mt-1">分流器 (当前方向→顺时针)</span>
+                </button>
+            </div>
+
+            <h2 class="text-sm font-semibold text-gray-500 mb-3">建造设置</h2>
+            <div class="flex flex-col gap-3 mb-6 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div>
+                    <label class="text-xs text-gray-500 flex justify-between">
+                        <span>批量铺设长度 (米)</span>
+                        <span id="build-length-val" class="font-medium">1</span>
+                    </label>
+                    <input type="range" id="build-length" min="1" max="16" value="1" class="w-full mt-1 accent-blue-500">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 flex justify-between items-center">
+                        <span>输送机速度 (m/min)</span>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="build-speed-input" min="1" max="600" step="1" value="60" class="w-14 px-1 text-right border border-gray-200 rounded text-amber-600 font-medium focus:outline-none focus:border-amber-500 bg-white">
+                        </div>
+                    </label>
+                    <input type="range" id="build-speed" min="10" max="240" step="10" value="60" class="w-full mt-1 accent-amber-500">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 flex justify-between items-center">
+                        <span>自动发货间隔 (秒)</span>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="build-interval-input" min="0.1" max="60" step="0.1" value="1.0" class="w-14 px-1 text-right border border-gray-200 rounded text-emerald-600 font-medium focus:outline-none focus:border-emerald-500 bg-white">
+                            <span class="text-emerald-600 font-medium">s</span>
+                        </div>
+                    </label>
+                    <input type="range" id="build-interval" min="0.1" max="20" step="0.1" value="1" class="w-full mt-1 accent-emerald-500">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 flex justify-between items-center">
+                        <span>转向移载时间 (秒)</span>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="build-transfer-input" min="0.0" max="10" step="0.5" value="2.0" class="w-14 px-1 text-right border border-gray-200 rounded text-purple-600 font-medium focus:outline-none focus:border-purple-500 bg-white">
+                            <span class="text-purple-600 font-medium">s</span>
+                        </div>
+                    </label>
+                    <input type="range" id="build-transfer" min="0" max="10" step="0.5" value="2" class="w-full mt-1 accent-purple-500">
+                </div>
+            </div>
+
+            <h2 class="text-sm font-semibold text-gray-500 mb-3">交互与管理</h2>
+            <div class="flex flex-col gap-2 mb-6">
+                <button class="tool-btn flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="spawner">
+                    <span class="text-lg">🏭</span>
+                    <span class="text-sm font-medium">自动发货机</span>
+                </button>
+                <button class="tool-btn flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-green-50 border-green-100" data-tool="receiver">
+                    <span class="text-lg">📥</span>
+                    <span class="text-sm font-medium">收货站</span>
+                </button>
+                <button class="tool-btn flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50" data-tool="box">
+                    <div class="w-4 h-4 bg-amber-500 border border-amber-700 rounded-sm"></div>
+                    <span class="text-sm font-medium">手动放货</span>
+                </button>
+                <button class="tool-btn flex items-center justify-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-red-50 text-red-600 border-red-100" data-tool="eraser">
+                    <span class="text-lg">🧹</span>
+                    <span class="text-sm font-medium">移除 (优先删货)</span>
+                </button>
+            </div>
+
+            <h2 class="text-sm font-semibold text-gray-500 mb-3">仿真控制</h2>
+            <div class="flex flex-col gap-4">
+                <div>
+                    <label class="text-xs text-gray-500 mb-1 block">预设模板</label>
+                    <select id="preset-select" class="w-full p-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-blue-400">
+                        <option value="">— 选择预设模板 —</option>
+                        <option value="straight">→ 直线输送</option>
+                        <option value="l-turn">↳ L型转弯</option>
+                        <option value="u-turn">↩ U型回绕</option>
+                        <option value="split">🔀 分流合流</option>
+                    </select>
+                </div>
+                <button id="btn-play" class="flex items-center justify-center gap-2 p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold shadow-md transition-colors">
+                    ▶️ 开始运行
+                </button>
+                <button id="btn-stop" class="hidden flex items-center justify-center gap-2 p-3 bg-red-500 text-white rounded-lg hover:bg-red-600 font-bold shadow-md transition-colors">
+                    ⏹️ 结束并统计
+                </button>
+                <div class="flex flex-col gap-2">
+                    <button id="btn-clear-items" class="flex items-center justify-center gap-2 p-2 text-sm text-amber-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg border border-amber-100 transition-colors">
+                        📦 一键清理货物
+                    </button>
+                    <button id="btn-clear-conveyors" class="flex items-center justify-center gap-2 p-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg border border-blue-100 transition-colors">
+                        🛤️ 一键清理输送机
+                    </button>
+                    <button id="btn-clear-all" class="flex items-center justify-center gap-2 p-2 text-sm text-gray-500 hover:text-red-500 hover:bg-gray-100 rounded-lg border border-gray-100 transition-colors">
+                        🗑️ 清空所有数据
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-save" class="flex-1 flex items-center justify-center gap-1 p-2 text-sm text-teal-600 hover:bg-teal-50 rounded-lg border border-teal-100 transition-colors">
+                        💾 保存
+                    </button>
+                    <button id="btn-load" class="flex-1 flex items-center justify-center gap-1 p-2 text-sm text-teal-600 hover:bg-teal-50 rounded-lg border border-teal-100 transition-colors">
+                        📂 加载
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-export" class="flex-1 flex items-center justify-center gap-1 p-2 text-xs text-violet-600 hover:bg-violet-50 rounded-lg border border-violet-100 transition-colors">
+                        📤 导出 JSON
+                    </button>
+                    <button id="btn-import" class="flex-1 flex items-center justify-center gap-1 p-2 text-xs text-violet-600 hover:bg-violet-50 rounded-lg border border-violet-100 transition-colors">
+                        📥 导入 JSON
+                    </button>
+                    <input type="file" id="import-file" accept=".json" class="hidden">
+                </div>
+                
+                <div class="mt-2">
+                    <label class="text-xs text-gray-500 flex justify-between items-center">
+                        <span>全局仿真速度</span>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="speed-input" min="0.1" max="1000" step="0.1" value="1.0" class="w-14 px-1 text-right border border-gray-200 rounded text-green-600 font-medium focus:outline-none focus:border-green-500 bg-white">
+                            <span class="text-green-600 font-medium">x</span>
+                        </div>
+                    </label>
+                    <input type="range" id="speed-slider" min="0.1" max="50" step="0.1" value="1" class="w-full mt-1 accent-green-500">
+                </div>
+                <button id="btn-heatmap" class="flex items-center justify-center gap-2 p-2 text-sm text-orange-600 hover:bg-orange-50 rounded-lg border border-orange-100 transition-colors">
+                    🗺️ 拥堵热力图: 关
+                </button>
+            </div>
+
+            <div id="stats-panel" class="hidden mt-6 p-4 bg-indigo-50 border border-indigo-100 rounded-lg">
+                <h3 class="text-sm font-bold text-indigo-800 mb-2 flex items-center gap-2">
+                    <span>📊</span> 仿真数据报告
+                </h3>
+                <div class="text-xs text-indigo-700 space-y-1">
+                    <p>运行耗时: <span id="stat-time" class="font-bold">0.0</span> 秒</p>
+                    <p>完成输送: <span id="stat-count" class="font-bold">0</span> 个货物</p>
+                    <p class="pt-2 border-t border-indigo-200 mt-2">
+                        吞吐率: <span id="stat-rate" class="text-lg font-black text-indigo-600">0.00</span> 个/秒
+                    </p>
+                    <div id="stat-receivers" class="pt-2 border-t border-indigo-200 mt-2"></div>
+                </div>
+            </div>
+            </div>
+
+            <div class="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="text-xs font-semibold text-gray-400 mb-2">⌨️ 快捷键</h3>
+                <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-500">
+                    <span><span class="kbd">1-4</span> 方向</span>
+                    <span><span class="kbd">E</span> 橡皮擦</span>
+                    <span><span class="kbd">B</span> 放货</span>
+                    <span><span class="kbd">F</span> 发货机</span>
+                    <span><span class="kbd">R</span> 收货站</span>
+                    <span><span class="kbd">D</span> 分流器</span>
+                    <span><span class="kbd">Space</span> 暂停</span>
+                    <span><span class="kbd">S</span> 保存</span>
+                    <span><span class="kbd">⌘Z</span> 撤销</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 右侧主画布区域 -->
+    <main class="flex-1 flex items-center justify-center relative bg-gray-900">
+        <canvas id="sim-canvas"></canvas>
+    </main>
+
+    <script>
+        // --- 核心配置 ---
+        const GRID_W = 16;       // 网格横向数量
+        const GRID_H = 12;       // 网格纵向数量
+        const CELL_SIZE = 50;    // 每个格子的像素边长
+        const BOX_SIZE = 28;     // 货物的像素边长 (小于CELL_SIZE以留出边距)
+
+        // 关键算法：完美居中的偏移量计算
+        const BOX_OFFSET = (CELL_SIZE - BOX_SIZE) / 2;
+
+        // --- 颜色常量 ---
+        const COLORS = {
+            // 输送带颜色
+            BELT_NORMAL: '#334155',
+            BELT_HIGH_SPEED: '#1e293b',
+            BELT_STRIPE_NORMAL: '#475569',
+            BELT_STRIPE_HIGH_SPEED: '#94a3b8',
+            BELT_RAIL: '#94a3b8',
+            HIGH_SPEED_THRESHOLD: 120,
+            DEFAULT_SPEED: 60,
+
+            // 收货站颜色
+            RECEIVER_OUTER: '#065f46',
+            RECEIVER_INNER: '#10b981',
+
+            // 分流器颜色
+            DIVERTER_OUTER: '#155e75',
+            DIVERTER_INNER: '#0891b2',
+
+            // 发货机颜色
+            SPAWNER_BG: 'rgba(59, 130, 246, 0.2)',
+            SPAWNER_BORDER: '#2563eb',
+            SPAWNER_CENTER: '#1e3a8a',
+
+            // 货物颜色
+            BOX_OUTER: '#d97706',
+            BOX_INNER: '#f59e0b',
+            BOX_TAPE: '#b45309',
+
+            // 进度条颜色
+            PROGRESS_BG: 'rgba(0, 0, 0, 0.5)',
+            PROGRESS_BAR: '#3b82f6',
+
+            // 网格颜色
+            GRID_LINE: '#e5e7eb',
+            GRID_LABEL: '#9ca3af',
+
+            // 预览颜色
+            PREVIEW_CONVEYOR: '#3b82f6',
+            PREVIEW_RECEIVER: '#10b981',
+            PREVIEW_BOX: '#f59e0b',
+            PREVIEW_ERASER: '#ef4444',
+
+            // 热力图颜色
+            HEATMAP_ALPHA: 0.45
+        };
+
+        // --- 状态数据 ---
+        // 网格地图: 0=空, 1=右, 2=下, 3=左, 4=上
+        let grid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+        
+        // 货物数组. 结构: { id, x, y, nextX, nextY, progress }
+        // x, y 是网格坐标。progress 是 0.0 到 1.0 的动画进度
+        let boxes = [];
+        let boxIdCounter = 0;
+        let spawners = [];
+
+        let currentTool = 'conveyor-1'; // 默认选中向右的输送带
+        let isRunning = false;
+        let speed = 1; // 全局仿真速度倍率
+        let buildLength = 1;
+        let buildSpeed = 60;
+        let buildInterval = 1;
+        let buildTransferTime = 2.0;
+        let lastTime = 0;
+        let simTime = 0; // 仿真累计时间(ms)，用于输送带动画
+        let activeTimeMs = 0;
+        let deliveredCount = 0;
+        let animationFrameId = null;
+        let isMouseDown = false;
+        let hoverX = -1, hoverY = -1; // 鼠标悬停的网格位置
+
+        // 撤销系统
+        let undoHistory = [];
+        const MAX_UNDO = 30;
+        function pushUndo() {
+            undoHistory.push({
+                grid: JSON.parse(JSON.stringify(grid)),
+                spawners: JSON.parse(JSON.stringify(spawners))
+            });
+            if (undoHistory.length > MAX_UNDO) undoHistory.shift();
+        }
+        function undo() {
+            if (undoHistory.length === 0) return;
+            const state = undoHistory.pop();
+            grid = state.grid;
+            spawners = state.spawners;
+            if (!isRunning) draw();
+            autoSave();
+        }
+
+        // 辅助函数
+        function isConveyor(cell) { return cell !== 0 && cell !== null && cell.dir !== undefined && !cell.type; }
+        function isReceiver(cell) { return cell !== null && typeof cell === 'object' && cell.type === 'receiver'; }
+        function isDiverter(cell) { return cell !== null && typeof cell === 'object' && cell.type === 'diverter'; }
+        let lastConveyorDir = 1; // 记录最后选择的输送带方向，用于分流器
+
+        // 热力图数据
+        let heatData = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+        let showHeatMap = false;
+
+        // 粒子特效系统
+        let particles = [];
+        const MAX_PARTICLES = 500; // 粒子数量上限，防止内存泄漏
+        function spawnParticles(px, py, color) {
+            if (particles.length >= MAX_PARTICLES) return; // 达到上限则不再生成
+            for (let i = 0; i < 10; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const spd = 1 + Math.random() * 2.5;
+                particles.push({
+                    x: px, y: py,
+                    vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
+                    life: 1.0, decay: 0.015 + Math.random() * 0.02,
+                    size: 2 + Math.random() * 3,
+                    color: color || '#10b981'
+                });
+            }
+        }
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy;
+                p.vy += 0.05; // 重力
+                p.life -= p.decay;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        // 吞吐量历史 (折线图)
+        let throughputHistory = [];
+        let lastThroughputSample = 0;
+        let lastDeliveredSnapshot = 0;
+
+        // 右键提示框
+        let tooltip = null;
+
+        // --- 获取 DOM 元素 ---
+        const canvas = document.getElementById('sim-canvas');
+        const ctx = canvas.getContext('2d');
+        const toolBtns = document.querySelectorAll('.tool-btn');
+        const btnPlay = document.getElementById('btn-play');
+        const btnStop = document.getElementById('btn-stop');
+        const btnClearItems = document.getElementById('btn-clear-items');
+        const btnClearConveyors = document.getElementById('btn-clear-conveyors');
+        const btnClearAll = document.getElementById('btn-clear-all');
+        const btnSave = document.getElementById('btn-save');
+        const btnLoad = document.getElementById('btn-load');
+        const btnExport = document.getElementById('btn-export');
+        const btnImport = document.getElementById('btn-import');
+        const importFile = document.getElementById('import-file');
+        const btnHeatmap = document.getElementById('btn-heatmap');
+        const presetSelect = document.getElementById('preset-select');
+        const statReceivers = document.getElementById('stat-receivers');
+        const speedSlider = document.getElementById('speed-slider');
+        const speedInput = document.getElementById('speed-input');
+        const buildLengthSlider = document.getElementById('build-length');
+        const buildLengthVal = document.getElementById('build-length-val');
+        const buildSpeedSlider = document.getElementById('build-speed');
+        const buildSpeedInput = document.getElementById('build-speed-input');
+        const buildIntervalSlider = document.getElementById('build-interval');
+        const buildIntervalInput = document.getElementById('build-interval-input');
+        const buildTransferSlider = document.getElementById('build-transfer');
+        const buildTransferInput = document.getElementById('build-transfer-input');
+        const statsPanel = document.getElementById('stats-panel');
+        const statTime = document.getElementById('stat-time');
+        const statCount = document.getElementById('stat-count');
+        const statRate = document.getElementById('stat-rate');
+
+        // 初始化画布尺寸
+        canvas.width = GRID_W * CELL_SIZE;
+        canvas.height = GRID_H * CELL_SIZE;
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            const maxW = container.clientWidth - 64;
+            const maxH = container.clientHeight - 64;
+            const scale = Math.min(maxW / canvas.width, maxH / canvas.height, 1);
+            canvas.style.width = (canvas.width * scale) + 'px';
+            canvas.style.height = (canvas.height * scale) + 'px';
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- 工具栏交互逻辑 ---
+        toolBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                toolBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTool = btn.dataset.tool;
+                // 记录最后选择的输送带方向
+                if (currentTool.startsWith('conveyor-')) {
+                    lastConveyorDir = parseInt(currentTool.split('-')[1]);
+                }
+            });
+        });
+
+        btnPlay.addEventListener('click', () => {
+            if (isRunning) {
+                isRunning = false;
+                btnPlay.innerHTML = '▶️ 继续运行';
+                btnPlay.className = 'flex items-center justify-center gap-2 p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold shadow-md transition-colors';
+                cancelAnimationFrame(animationFrameId);
+            } else {
+                // 如果之前已经结束统计并显示了面板，说明这是全新的一次运行
+                if (!statsPanel.classList.contains('hidden')) {
+                    activeTimeMs = 0;
+                    deliveredCount = 0;
+                    heatData = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+                    statsPanel.classList.add('hidden');
+                }
+                
+                isRunning = true;
+                btnPlay.innerHTML = '⏸️ 暂停运行';
+                btnPlay.className = 'flex items-center justify-center gap-2 p-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-bold shadow-md transition-colors';
+                
+                btnStop.classList.remove('hidden');
+                
+                lastTime = performance.now();
+                gameLoop(lastTime);
+            }
+        });
+
+        btnStop.addEventListener('click', () => {
+            if (!isRunning && activeTimeMs === 0) return;
+            
+            isRunning = false;
+            btnPlay.innerHTML = '▶️ 重新运行';
+            btnPlay.className = 'flex items-center justify-center gap-2 p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-bold shadow-md transition-colors';
+            cancelAnimationFrame(animationFrameId);
+            
+            btnStop.classList.add('hidden');
+            
+            // 显示统计
+            const timeSec = (activeTimeMs / 1000).toFixed(1);
+            const rate = timeSec > 0 ? (deliveredCount / (activeTimeMs / 1000)).toFixed(2) : "0.00";
+            
+            statTime.innerText = timeSec;
+            statCount.innerText = deliveredCount;
+            statRate.innerText = rate;
+            
+            // 每个收货站的统计
+            let receiverHTML = '';
+            let rIdx = 0;
+            for (let y = 0; y < GRID_H; y++) {
+                for (let x = 0; x < GRID_W; x++) {
+                    const cell = grid[y][x];
+                    if (isReceiver(cell) && (cell.collected || 0) > 0) {
+                        rIdx++;
+                        receiverHTML += `<p>📥 收货站(${x},${y}): <span class="font-bold">${cell.collected}</span> 个</p>`;
+                    }
+                }
+            }
+            statReceivers.innerHTML = receiverHTML || '<p class="text-indigo-400">无收货站数据</p>';
+            
+            statsPanel.classList.remove('hidden');
+            
+            // 自动滚动到底部以显示统计面板
+            statsPanel.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        });
+
+        btnClearItems.addEventListener('click', () => {
+            boxes = [];
+            activeTimeMs = 0;
+            deliveredCount = 0;
+            statsPanel.classList.add('hidden');
+            if (!isRunning) draw();
+        });
+
+        btnClearConveyors.addEventListener('click', () => {
+            grid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+            // 同步清除无输送带的发货机
+            spawners = spawners.filter(s => grid[s.y] && grid[s.y][s.x] !== 0);
+            if (!isRunning) draw();
+        });
+
+        btnClearAll.addEventListener('click', () => {
+            grid = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+            boxes = [];
+            spawners = [];
+            activeTimeMs = 0;
+            deliveredCount = 0;
+            statsPanel.classList.add('hidden');
+            if (!isRunning) draw(); // 如果停止状态，主动刷新一下画面
+        });
+
+        speedSlider.addEventListener('input', (e) => {
+            speed = parseFloat(e.target.value);
+            speedInput.value = speed.toFixed(1);
+        });
+
+        speedInput.addEventListener('change', (e) => {
+            let val = parseFloat(e.target.value);
+            if (isNaN(val) || val <= 0) val = 0.1;
+            speed = val;
+            speedInput.value = val.toFixed(1);
+            if (val <= parseFloat(speedSlider.max) && val >= parseFloat(speedSlider.min)) {
+                speedSlider.value = val;
+            }
+        });
+
+        buildLengthSlider.addEventListener('input', (e) => {
+            buildLength = parseInt(e.target.value);
+            buildLengthVal.innerText = buildLength;
+        });
+
+        buildSpeedSlider.addEventListener('input', (e) => {
+            buildSpeed = parseFloat(e.target.value);
+            buildSpeedInput.value = buildSpeed;
+        });
+
+        buildSpeedInput.addEventListener('change', (e) => {
+            let val = parseFloat(e.target.value);
+            if (isNaN(val) || val <= 0) val = 10;
+            buildSpeed = val;
+            buildSpeedInput.value = val;
+            if (val <= parseFloat(buildSpeedSlider.max) && val >= parseFloat(buildSpeedSlider.min)) {
+                buildSpeedSlider.value = val;
+            }
+        });
+
+        buildIntervalSlider.addEventListener('input', (e) => {
+            buildInterval = parseFloat(e.target.value);
+            buildIntervalInput.value = buildInterval.toFixed(1);
+        });
+
+        buildIntervalInput.addEventListener('change', (e) => {
+            let val = parseFloat(e.target.value);
+            if (isNaN(val) || val <= 0) val = 0.1;
+            buildInterval = val;
+            buildIntervalInput.value = val.toFixed(1);
+            if (val <= parseFloat(buildIntervalSlider.max) && val >= parseFloat(buildIntervalSlider.min)) {
+                buildIntervalSlider.value = val;
+            }
+        });
+
+        buildTransferSlider.addEventListener('input', (e) => {
+            buildTransferTime = parseFloat(e.target.value);
+            buildTransferInput.value = buildTransferTime.toFixed(1);
+        });
+
+        buildTransferInput.addEventListener('change', (e) => {
+            let val = parseFloat(e.target.value);
+            if (isNaN(val) || val < 0) val = 0;
+            buildTransferTime = val;
+            buildTransferInput.value = val.toFixed(1);
+            if (val <= parseFloat(buildTransferSlider.max) && val >= parseFloat(buildTransferSlider.min)) {
+                buildTransferSlider.value = val;
+            }
+        });
+
+        // --- 画布鼠标交互逻辑 ---
+        function getGridPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = Math.floor(((e.clientX - rect.left) * scaleX) / CELL_SIZE);
+            const y = Math.floor(((e.clientY - rect.top) * scaleY) / CELL_SIZE);
+            return { x, y };
+        }
+
+        function handleInteract(gx, gy) {
+            if (gx < 0 || gx >= GRID_W || gy < 0 || gy >= GRID_H) return;
+
+            if (currentTool.startsWith('conveyor-')) {
+                pushUndo();
+                const dir = parseInt(currentTool.split('-')[1]);
+                for (let i = 0; i < buildLength; i++) {
+                    let targetX = gx;
+                    let targetY = gy;
+                    
+                    if (dir === 1) targetX += i;
+                    else if (dir === 2) targetY += i;
+                    else if (dir === 3) targetX -= i;
+                    else if (dir === 4) targetY -= i;
+                    
+                    if (targetX >= 0 && targetX < GRID_W && targetY >= 0 && targetY < GRID_H) {
+                        grid[targetY][targetX] = { dir: dir, speed: buildSpeed, transferTime: buildTransferTime };
+                    }
+                }
+                autoSave();
+            } 
+            else if (currentTool === 'eraser') {
+                pushUndo();
+                let boxRemoved = false;
+                for (let i = boxes.length - 1; i >= 0; i--) {
+                    const b = boxes[i];
+                    const renderX = Math.round(b.x + (b.nextX - b.x) * b.progress);
+                    const renderY = Math.round(b.y + (b.nextY - b.y) * b.progress);
+                    if (renderX === gx && renderY === gy) {
+                        boxes.splice(i, 1);
+                        boxRemoved = true;
+                        break;
+                    }
+                }
+                
+                let spawnerRemoved = false;
+                if (!boxRemoved) {
+                    for (let i = spawners.length - 1; i >= 0; i--) {
+                        if (spawners[i].x === gx && spawners[i].y === gy) {
+                            spawners.splice(i, 1);
+                            spawnerRemoved = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!boxRemoved && !spawnerRemoved) {
+                    grid[gy][gx] = 0;
+                }
+                autoSave();
+            } 
+            else if (currentTool === 'box') {
+                const cell = grid[gy][gx];
+                const hasBox = boxes.some(b => 
+                    (b.x === gx && b.y === gy) || 
+                    (b.nextX === gx && b.nextY === gy)
+                );
+                if (!hasBox && isConveyor(cell)) {
+                    boxes.push({
+                        id: ++boxIdCounter,
+                        x: gx, y: gy,
+                        nextX: gx, nextY: gy,
+                        progress: 0,
+                        lastDir: 0,
+                        transferWait: 0,
+                        transferTotal: 0
+                    });
+                }
+            }
+            else if (currentTool === 'spawner') {
+                const cell = grid[gy][gx];
+                const hasSpawner = spawners.some(s => s.x === gx && s.y === gy);
+                if (!hasSpawner && isConveyor(cell)) {
+                    pushUndo();
+                    spawners.push({ x: gx, y: gy, timer: 0, interval: buildInterval * 1000 });
+                    autoSave();
+                }
+            }
+            else if (currentTool === 'receiver') {
+                const cell = grid[gy][gx];
+                if (!isReceiver(cell)) {
+                    pushUndo();
+                    grid[gy][gx] = { type: 'receiver', collected: 0 };
+                    spawners = spawners.filter(s => !(s.x === gx && s.y === gy));
+                    autoSave();
+                }
+            }
+            else if (currentTool === 'diverter') {
+                pushUndo();
+                const dir1 = lastConveyorDir;
+                const dir2 = (dir1 % 4) + 1; // 顺时针旋转90°
+                grid[gy][gx] = { type: 'diverter', dir1, dir2, speed: buildSpeed, transferTime: buildTransferTime, counter: 0 };
+                autoSave();
+            }
+            if (!isRunning) draw();
+        }
+
+        // 鼠标拖拽事件注册
+        canvas.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            const { x, y } = getGridPos(e);
+            handleInteract(x, y);
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const { x, y } = getGridPos(e);
+            const changed = x !== hoverX || y !== hoverY;
+            hoverX = x;
+            hoverY = y;
+            if (isMouseDown) {
+                handleInteract(x, y);
+            } else if (!isRunning && changed) {
+                draw();
+            }
+        });
+        
+        canvas.addEventListener('mouseup', () => isMouseDown = false);
+        canvas.addEventListener('mouseleave', () => { isMouseDown = false; hoverX = -1; hoverY = -1; if (!isRunning) draw(); });
+
+        function updatePhysics(dt) {
+            // 处理自动发货机
+            for (let s of spawners) {
+                // 将真实时间增量乘以全局仿真速度
+                s.timer += dt * speed;
+                const currentInterval = s.interval || 1000; // 兼容旧数据
+                if (s.timer >= currentInterval) {
+                    const hasBox = boxes.some(b => 
+                        (b.x === s.x && b.y === s.y) || 
+                        (b.nextX === s.x && b.nextY === s.y)
+                    );
+                    if (!hasBox && isConveyor(grid[s.y][s.x])) {
+                        boxes.push({
+                            id: ++boxIdCounter,
+                            x: s.x, y: s.y,
+                            nextX: s.x, nextY: s.y,
+                            progress: 0,
+                            lastDir: grid[s.y][s.x].dir,
+                            transferWait: 0,
+                            transferTotal: 0
+                        });
+                        s.timer = 0;
+                    } else if (hasBox) {
+                        // 如果有货物堵塞，保持计时器在最大值，一旦空出立刻发货
+                        s.timer = currentInterval;
+                    }
+                }
+            }
+
+            // 构建占位地图用于 O(1) 碰撞检测
+            const visualMap = new Map();
+            const targetMap = new Map();
+            for (const b of boxes) {
+                const vx = Math.round(b.x + (b.nextX - b.x) * b.progress);
+                const vy = Math.round(b.y + (b.nextY - b.y) * b.progress);
+                visualMap.set(vx + ',' + vy, b);
+                const tk = b.nextX + ',' + b.nextY;
+                if (!targetMap.has(tk)) targetMap.set(tk, []);
+                targetMap.get(tk).push(b);
+            }
+
+            for (let i = boxes.length - 1; i >= 0; i--) {
+                let b = boxes[i];
+
+                // 安全获取当前格子，处理越界情况
+                const currentCell = (grid[b.y] && grid[b.y][b.x]) ?? 0;
+                const beltSpeed = (currentCell !== 0 && currentCell.speed) ? currentCell.speed : 60;
+                const speedCellsPerSec = beltSpeed / 60;
+                const progressDelta = (speedCellsPerSec * speed * dt) / 1000;
+
+                // 处理移载倒计时
+                if (b.transferWait > 0) {
+                    b.transferWait -= speed * dt;
+                    if (b.transferWait < 0) b.transferWait = 0;
+                }
+
+                // 1. 决定目标点 (如果当前没有在移动)
+                if (b.x === b.nextX && b.y === b.nextY) {
+                    let dir = 0;
+                    let cellTransferTime = 0;
+                    
+                    if (isConveyor(currentCell)) {
+                        dir = currentCell.dir;
+                        cellTransferTime = currentCell.transferTime || 0;
+                    } else if (isDiverter(currentCell)) {
+                        // 分流器：交替方向
+                        dir = currentCell.counter % 2 === 0 ? currentCell.dir1 : currentCell.dir2;
+                        cellTransferTime = currentCell.transferTime || 0;
+                        currentCell.counter++;
+                    }
+                    
+                    if (dir !== 0) {
+                        if (b.lastDir !== 0 && b.lastDir !== dir && cellTransferTime > 0) {
+                            b.transferWait = cellTransferTime * 1000;
+                            b.transferTotal = cellTransferTime * 1000;
+                        }
+                        b.lastDir = dir;
+
+                        if (dir === 1) b.nextX = b.x + 1;
+                        else if (dir === 2) b.nextY = b.y + 1;
+                        else if (dir === 3) b.nextX = b.x - 1;
+                        else if (dir === 4) b.nextY = b.y - 1;
+                    }
+                }
+
+                // 2. 如果有了目标点，并且不在移载中，进行移动
+                if ((b.x !== b.nextX || b.y !== b.nextY) && b.transferWait <= 0) {
+                    
+                    let blocked = false;
+                    const targetKey = b.nextX + ',' + b.nextY;
+                    
+                    // 冲突1：汇入竞争 — 用 targetMap O(1) 查询
+                    const competitors = targetMap.get(targetKey) || [];
+                    for (const other of competitors) {
+                        if (other.id === b.id) continue;
+                        if (other.progress > b.progress) { blocked = true; break; }
+                        if (other.progress === b.progress && other.id < b.id) { blocked = true; break; }
+                    }
+                    
+                    // 冲突2：目标格子视觉占位 — 用 visualMap O(1) 查询
+                    if (!blocked) {
+                        const occupant = visualMap.get(targetKey);
+                        if (occupant && occupant.id !== b.id) blocked = true;
+                    }
+
+                    if (!blocked) {
+                        b.progress += progressDelta;
+                    } else {
+                        // 记录拥堵数据
+                        const bvx = Math.round(b.x + (b.nextX - b.x) * b.progress);
+                        const bvy = Math.round(b.y + (b.nextY - b.y) * b.progress);
+                        if (bvx >= 0 && bvx < GRID_W && bvy >= 0 && bvy < GRID_H) {
+                            heatData[bvy][bvx] += dt / 1000;
+                        }
+                    }
+
+                    // 3. 到达目标点
+                    if (b.progress >= 1.0) {
+                        b.x = b.nextX;
+                        b.y = b.nextY;
+                        b.progress = 0;
+
+                        if (b.x < 0 || b.x >= GRID_W || b.y < 0 || b.y >= GRID_H) {
+                            boxes.splice(i, 1);
+                            deliveredCount++;
+                        } else {
+                            const arrivedCell = grid[b.y][b.x];
+                            if (arrivedCell === 0 || isReceiver(arrivedCell)) {
+                                if (isReceiver(arrivedCell)) arrivedCell.collected = (arrivedCell.collected || 0) + 1;
+                                boxes.splice(i, 1);
+                                deliveredCount++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 渲染逻辑 ---
+
+        // 绘制网格背景
+        function drawGrid() {
+            ctx.strokeStyle = COLORS.GRID_LINE;
+            ctx.lineWidth = 1;
+            for (let y = 0; y <= GRID_H; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * CELL_SIZE);
+                ctx.lineTo(canvas.width, y * CELL_SIZE);
+                ctx.stroke();
+            }
+            for (let x = 0; x <= GRID_W; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * CELL_SIZE, 0);
+                ctx.lineTo(x * CELL_SIZE, canvas.height);
+                ctx.stroke();
+            }
+            // 网格坐标标签
+            ctx.save();
+            ctx.font = '9px monospace';
+            ctx.fillStyle = COLORS.GRID_LABEL;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for (let x = 0; x < GRID_W; x++) {
+                ctx.fillText(x, x * CELL_SIZE + CELL_SIZE / 2, 2);
+            }
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            for (let y = 0; y < GRID_H; y++) {
+                ctx.fillText(y, 3, y * CELL_SIZE + CELL_SIZE / 2);
+            }
+            ctx.restore();
+        }
+
+        // 绘制收货站
+        function drawReceiver(x, y) {
+            const px = x * CELL_SIZE;
+            const py = y * CELL_SIZE;
+            ctx.fillStyle = COLORS.RECEIVER_OUTER;
+            ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+            ctx.fillStyle = COLORS.RECEIVER_INNER;
+            ctx.fillRect(px + 6, py + 6, CELL_SIZE - 12, CELL_SIZE - 12);
+            // 画✔标记
+            ctx.save();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            const cx = px + CELL_SIZE / 2;
+            const cy = py + CELL_SIZE / 2;
+            ctx.moveTo(cx - 8, cy);
+            ctx.lineTo(cx - 2, cy + 7);
+            ctx.lineTo(cx + 9, cy - 6);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // 绘制分流器
+        function drawDiverter(x, y, cell) {
+            const px = x * CELL_SIZE;
+            const py = y * CELL_SIZE;
+            ctx.fillStyle = COLORS.DIVERTER_OUTER;
+            ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+            ctx.fillStyle = COLORS.DIVERTER_INNER;
+            ctx.fillRect(px + 5, py + 5, CELL_SIZE - 10, CELL_SIZE - 10);
+            // 画两个方向箭头
+            const dirArrows = { 1: '→', 2: '↓', 3: '←', 4: '↑' };
+            ctx.save();
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#fff';
+            const cx = px + CELL_SIZE / 2;
+            const cy = py + CELL_SIZE / 2;
+            ctx.fillText(dirArrows[cell.dir1] + '|' + dirArrows[cell.dir2], cx, cy);
+            ctx.restore();
+        }
+
+        // 绘制输送带
+        function drawConveyor(x, y, cell) {
+            const dir = cell.dir;
+            const beltSpeed = cell.speed;
+            const cx = x * CELL_SIZE + CELL_SIZE / 2;
+            const cy = y * CELL_SIZE + CELL_SIZE / 2;
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            // 根据方向旋转画布: 1:右(0deg), 2:下(90deg), 3:左(180deg), 4:上(270deg)
+            if (dir === 2) ctx.rotate(Math.PI / 2);
+            else if (dir === 3) ctx.rotate(Math.PI);
+            else if (dir === 4) ctx.rotate(-Math.PI / 2);
+
+            const beltWidth = CELL_SIZE - 6;
+            const beltLength = CELL_SIZE;
+
+            // 设定剪裁区域
+            ctx.beginPath();
+            ctx.rect(-beltLength / 2, -beltWidth / 2, beltLength, beltWidth);
+            ctx.clip();
+
+            // 画履带底板 (根据速度改变底色)
+            const isHighSpeed = beltSpeed >= COLORS.HIGH_SPEED_THRESHOLD;
+            ctx.fillStyle = isHighSpeed ? COLORS.BELT_HIGH_SPEED : COLORS.BELT_NORMAL;
+            ctx.fillRect(-beltLength / 2, -beltWidth / 2, beltLength, beltWidth);
+
+            // 画滚动的人字形(Chevron)防滑纹理
+            ctx.strokeStyle = isHighSpeed ? COLORS.BELT_STRIPE_HIGH_SPEED : COLORS.BELT_STRIPE_NORMAL;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            const stripeSpacing = 16;
+            const movePx = (simTime / 1000) * (beltSpeed / 60) * CELL_SIZE;
+            const offset = movePx % stripeSpacing;
+
+            ctx.beginPath();
+            for (let lx = -beltLength / 2 - stripeSpacing * 2; lx <= beltLength / 2 + stripeSpacing; lx += stripeSpacing) {
+                const drawX = lx + offset;
+                ctx.moveTo(drawX - 4, -beltWidth / 2 + 4);
+                ctx.lineTo(drawX + 4, 0);
+                ctx.lineTo(drawX - 4, beltWidth / 2 - 4);
+            }
+            ctx.stroke();
+
+            ctx.restore();
+
+            // 画两侧的固定导轨
+            ctx.save();
+            ctx.translate(cx, cy);
+            if (dir === 2) ctx.rotate(Math.PI / 2);
+            else if (dir === 3) ctx.rotate(Math.PI);
+            else if (dir === 4) ctx.rotate(-Math.PI / 2);
+
+            ctx.fillStyle = COLORS.BELT_RAIL;
+            ctx.fillRect(-CELL_SIZE / 2, -CELL_SIZE / 2 + 1, CELL_SIZE, 2);
+            ctx.fillRect(-CELL_SIZE / 2, CELL_SIZE / 2 - 3, CELL_SIZE, 2);
+            ctx.restore();
+
+            // 速度标签 (非默认速度时显示)
+            if (beltSpeed !== COLORS.DEFAULT_SPEED) {
+                ctx.save();
+                ctx.font = 'bold 9px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'bottom';
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+                ctx.lineWidth = 2;
+                const label = beltSpeed + '';
+                const lx = x * CELL_SIZE + CELL_SIZE - 3;
+                const ly = y * CELL_SIZE + CELL_SIZE - 2;
+                ctx.strokeText(label, lx, ly);
+                ctx.fillText(label, lx, ly);
+                ctx.restore();
+            }
+        }
+
+        // 绘制所有输送带和设施
+        function drawConveyors() {
+            for (let y = 0; y < GRID_H; y++) {
+                for (let x = 0; x < GRID_W; x++) {
+                    const cell = grid[y][x];
+                    if (isReceiver(cell)) {
+                        drawReceiver(x, y);
+                    } else if (isDiverter(cell)) {
+                        drawDiverter(x, y, cell);
+                    } else if (isConveyor(cell)) {
+                        drawConveyor(x, y, cell);
+                    }
+                }
+            }
+        }
+
+        // 绘制自动发货机
+        function drawSpawners() {
+            for (let s of spawners) {
+                const cx = s.x * CELL_SIZE + CELL_SIZE / 2;
+                const cy = s.y * CELL_SIZE + CELL_SIZE / 2;
+                const currentInterval = s.interval ? (s.interval / 1000) : 1;
+
+                ctx.save();
+                ctx.translate(cx, cy);
+
+                ctx.fillStyle = COLORS.SPAWNER_BG;
+                ctx.fillRect(-CELL_SIZE / 2, -CELL_SIZE / 2, CELL_SIZE, CELL_SIZE);
+
+                ctx.strokeStyle = COLORS.SPAWNER_BORDER;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeRect(-CELL_SIZE / 2 + 2, -CELL_SIZE / 2 + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+
+                ctx.fillStyle = COLORS.SPAWNER_CENTER;
+                ctx.beginPath();
+                ctx.arc(0, 0, 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = COLORS.SPAWNER_CENTER;
+                ctx.strokeText(currentInterval.toFixed(1) + 's', 0, 16);
+                ctx.fillText(currentInterval.toFixed(1) + 's', 0, 16);
+
+                ctx.restore();
+            }
+        }
+
+        // 绘制货物
+        function drawBoxes() {
+            for (let b of boxes) {
+                const renderX = (b.x + (b.nextX - b.x) * b.progress) * CELL_SIZE + BOX_OFFSET;
+                const renderY = (b.y + (b.nextY - b.y) * b.progress) * CELL_SIZE + BOX_OFFSET;
+
+                // 绘制纸箱
+                ctx.fillStyle = COLORS.BOX_OUTER;
+                ctx.fillRect(renderX, renderY, BOX_SIZE, BOX_SIZE);
+
+                ctx.fillStyle = COLORS.BOX_INNER;
+                ctx.fillRect(renderX + 2, renderY + 2, BOX_SIZE - 4, BOX_SIZE - 4);
+
+                // 纸箱顶部的十字胶带线
+                ctx.strokeStyle = COLORS.BOX_TAPE;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(renderX + BOX_SIZE / 2, renderY);
+                ctx.lineTo(renderX + BOX_SIZE / 2, renderY + BOX_SIZE);
+                ctx.moveTo(renderX, renderY + BOX_SIZE / 2);
+                ctx.lineTo(renderX + BOX_SIZE, renderY + BOX_SIZE / 2);
+                ctx.stroke();
+
+                // 绘制移载进度条
+                if (b.transferWait > 0) {
+                    const barWidth = BOX_SIZE;
+                    const barHeight = 4;
+                    const progressRatio = 1 - (b.transferWait / b.transferTotal);
+
+                    ctx.fillStyle = COLORS.PROGRESS_BG;
+                    ctx.fillRect(renderX, renderY - 8, barWidth, barHeight);
+                    ctx.fillStyle = COLORS.PROGRESS_BAR;
+                    ctx.fillRect(renderX, renderY - 8, barWidth * progressRatio, barHeight);
+                }
+            }
+        }
+
+        // 绘制热力图
+        function drawHeatmap() {
+            if (!showHeatMap) return;
+
+            let maxHeat = 0;
+            for (let y = 0; y < GRID_H; y++)
+                for (let x = 0; x < GRID_W; x++)
+                    if (heatData[y][x] > maxHeat) maxHeat = heatData[y][x];
+
+            if (maxHeat > 0) {
+                for (let y = 0; y < GRID_H; y++) {
+                    for (let x = 0; x < GRID_W; x++) {
+                        const v = heatData[y][x];
+                        if (v > 0) {
+                            const intensity = Math.min(v / maxHeat, 1);
+                            const r = intensity < 0.5 ? Math.round(255 * intensity * 2) : 255;
+                            const g = intensity < 0.5 ? 255 : Math.round(255 * (1 - (intensity - 0.5) * 2));
+                            ctx.fillStyle = `rgba(${r}, ${g}, 0, ${COLORS.HEATMAP_ALPHA})`;
+                            ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+
+                            if (v >= 0.5) {
+                                ctx.save();
+                                ctx.font = 'bold 10px monospace';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'middle';
+                                ctx.fillStyle = '#fff';
+                                ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                                ctx.lineWidth = 2;
+                                const label = v >= 10 ? v.toFixed(0) : v.toFixed(1);
+                                ctx.strokeText(label, x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2);
+                                ctx.fillText(label, x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2);
+                                ctx.restore();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 绘制建造预览
+        function drawPreview() {
+            if (isRunning || hoverX < 0 || hoverX >= GRID_W || hoverY < 0 || hoverY >= GRID_H) return;
+
+            const px = hoverX * CELL_SIZE;
+            const py = hoverY * CELL_SIZE;
+            ctx.save();
+            ctx.globalAlpha = 0.35;
+
+            if (currentTool.startsWith('conveyor-')) {
+                const dir = parseInt(currentTool.split('-')[1]);
+                for (let i = 0; i < buildLength; i++) {
+                    let tx = hoverX, ty = hoverY;
+                    if (dir === 1) tx += i;
+                    else if (dir === 2) ty += i;
+                    else if (dir === 3) tx -= i;
+                    else if (dir === 4) ty -= i;
+
+                    if (tx >= 0 && tx < GRID_W && ty >= 0 && ty < GRID_H) {
+                        ctx.fillStyle = COLORS.PREVIEW_CONVEYOR;
+                        ctx.fillRect(tx * CELL_SIZE + 2, ty * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+                        const arrows = ['→', '↓', '←', '↑'];
+                        ctx.globalAlpha = 0.7;
+                        ctx.fillStyle = '#fff';
+                        ctx.font = 'bold 20px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(arrows[dir - 1], tx * CELL_SIZE + CELL_SIZE / 2, ty * CELL_SIZE + CELL_SIZE / 2);
+                        ctx.globalAlpha = 0.35;
+                    }
+                }
+            } else if (currentTool === 'receiver') {
+                ctx.fillStyle = COLORS.PREVIEW_RECEIVER;
+                ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+            } else if (currentTool === 'spawner') {
+                ctx.fillStyle = COLORS.PREVIEW_CONVEYOR;
+                ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+            } else if (currentTool === 'box') {
+                ctx.fillStyle = COLORS.PREVIEW_BOX;
+                ctx.fillRect(px + BOX_OFFSET, py + BOX_OFFSET, BOX_SIZE, BOX_SIZE);
+            } else if (currentTool === 'eraser') {
+                ctx.fillStyle = COLORS.PREVIEW_ERASER;
+                ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+                ctx.strokeStyle = COLORS.PREVIEW_ERASER;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(px + 12, py + 12);
+                ctx.lineTo(px + CELL_SIZE - 12, py + CELL_SIZE - 12);
+                ctx.moveTo(px + CELL_SIZE - 12, py + 12);
+                ctx.lineTo(px + 12, py + CELL_SIZE - 12);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // 主渲染函数
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            drawConveyors();
+            drawSpawners();
+            drawBoxes();
+            drawHeatmap();
+            drawPreview();
+        }
+
+        // --- HUD 覆盖层 ---
+        function drawHUD() {
+            if (!isRunning && activeTimeMs === 0) return;
+            const padding = 10;
+            const timeSec = (activeTimeMs / 1000);
+            const rate = timeSec > 0 ? (deliveredCount / timeSec) : 0;
+            const lines = [
+                `📦 ${boxes.length}  |  ✅ ${deliveredCount}`,
+                `⏱️ ${timeSec.toFixed(1)}s  |  📊 ${rate.toFixed(2)}/s  |  ⚡${speed.toFixed(1)}x`
+            ];
+            ctx.save();
+            ctx.font = 'bold 12px monospace';
+            const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+            const boxH = lines.length * 18 + padding;
+            const boxW = maxW + padding * 2;
+            const bx = canvas.width - boxW - 8;
+            const by = 8;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.beginPath();
+            ctx.roundRect(bx, by, boxW, boxH, 6);
+            ctx.fill();
+            ctx.fillStyle = '#e5e7eb';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            lines.forEach((line, i) => {
+                ctx.fillText(line, bx + padding, by + padding/2 + i * 18);
+            });
+            ctx.restore();
+        }
+
+        // --- 主循环 ---
+        function gameLoop(timestamp) {
+            if (!isRunning) return;
+            const dt = timestamp - lastTime;
+            lastTime = timestamp;
+            const simDt = dt * speed;
+            activeTimeMs += simDt;
+            simTime += simDt;
+
+            updatePhysics(dt);
+            draw();
+            drawHUD();
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- 保存/加载 ---
+        const SAVE_KEY = 'logistics-sandbox-v2';
+        function saveLayout() {
+            try {
+                const data = { grid, spawners, version: 2 };
+                localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+                return true;
+            } catch (e) {
+                console.warn('保存失败:', e);
+                return false;
+            }
+        }
+        function autoSave() {
+            saveLayout(); // 每次建造操作后自动保存
+        }
+        function loadLayout() {
+            try {
+                const raw = localStorage.getItem(SAVE_KEY);
+                if (!raw) return false;
+                const data = JSON.parse(raw);
+                if (data.grid) grid = data.grid;
+                if (data.spawners) spawners = data.spawners;
+                return true;
+            } catch(e) {
+                console.warn('加载失败:', e);
+                return false;
+            }
+        }
+        btnSave.addEventListener('click', () => {
+            saveLayout();
+            btnSave.textContent = '✅ 已保存';
+            setTimeout(() => btnSave.innerHTML = '💾 保存', 1500);
+        });
+        btnLoad.addEventListener('click', () => {
+            if (loadLayout()) {
+                btnLoad.textContent = '✅ 已加载';
+                if (!isRunning) draw();
+            } else {
+                btnLoad.textContent = '❌ 无存档';
+            }
+            setTimeout(() => btnLoad.innerHTML = '📂 加载', 1500);
+        });
+
+        // --- 预设模板 ---
+        const PRESETS = {
+            straight: () => {
+                const g = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+                const sp = [];
+                for (let x = 1; x < 15; x++) g[5][x] = { dir: 1, speed: 60, transferTime: 0 };
+                sp.push({ x: 1, y: 5, timer: 0, interval: 1000 });
+                g[5][15] = { type: 'receiver', collected: 0 };
+                return { grid: g, spawners: sp };
+            },
+            'l-turn': () => {
+                const g = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+                const sp = [];
+                for (let x = 2; x < 10; x++) g[3][x] = { dir: 1, speed: 60, transferTime: 2 };
+                for (let y = 3; y < 10; y++) g[y][10] = { dir: 2, speed: 60, transferTime: 2 };
+                g[10][10] = { type: 'receiver', collected: 0 };
+                sp.push({ x: 2, y: 3, timer: 0, interval: 800 });
+                return { grid: g, spawners: sp };
+            },
+            'u-turn': () => {
+                const g = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+                const sp = [];
+                for (let x = 2; x < 14; x++) g[2][x] = { dir: 1, speed: 80, transferTime: 1.5 };
+                for (let y = 2; y < 9; y++) g[y][14] = { dir: 2, speed: 80, transferTime: 1.5 };
+                for (let x = 14; x > 2; x--) g[9][x] = { dir: 3, speed: 80, transferTime: 1.5 };
+                g[9][2] = { type: 'receiver', collected: 0 };
+                sp.push({ x: 2, y: 2, timer: 0, interval: 600 });
+                return { grid: g, spawners: sp };
+            },
+            split: () => {
+                const g = Array.from({ length: GRID_H }, () => Array(GRID_W).fill(0));
+                const sp = [];
+                for (let x = 2; x < 7; x++) g[5][x] = { dir: 1, speed: 60, transferTime: 0 };
+                g[5][7] = { type: 'diverter', dir1: 1, dir2: 4, speed: 60, transferTime: 1, counter: 0 };
+                // 上路
+                g[5][8] = { dir: 1, speed: 60, transferTime: 1 };
+                for (let y = 5; y > 1; y--) g[y][8] = { dir: 4, speed: 60, transferTime: 1 };
+                for (let x = 8; x < 14; x++) g[1][x] = { dir: 1, speed: 90, transferTime: 0 };
+                g[1][14] = { type: 'receiver', collected: 0 };
+                // 下路 (直行)
+                for (let x = 8; x < 14; x++) g[5][x] = { dir: 1, speed: 60, transferTime: 0 };
+                g[5][14] = { type: 'receiver', collected: 0 };
+                sp.push({ x: 2, y: 5, timer: 0, interval: 800 });
+                return { grid: g, spawners: sp };
+            }
+        };
+        presetSelect.addEventListener('change', (e) => {
+            const key = e.target.value;
+            if (!key || !PRESETS[key]) return;
+            pushUndo();
+            const preset = PRESETS[key]();
+            grid = preset.grid;
+            spawners = preset.spawners;
+            boxes = [];
+            activeTimeMs = 0;
+            deliveredCount = 0;
+            autoSave();
+            if (!isRunning) draw();
+            presetSelect.value = '';
+        });
+
+        // --- 键盘快捷键 ---
+        function selectTool(toolName) {
+            currentTool = toolName;
+            toolBtns.forEach(b => {
+                b.classList.toggle('active', b.dataset.tool === toolName);
+            });
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            // Cmd+Z / Ctrl+Z 撤销
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                e.preventDefault();
+                undo();
+                return;
+            }
+            switch(e.key) {
+                case '1': selectTool('conveyor-1'); break;
+                case '2': selectTool('conveyor-2'); break;
+                case '3': selectTool('conveyor-3'); break;
+                case '4': selectTool('conveyor-4'); break;
+                case 'e': case 'E': selectTool('eraser'); break;
+                case 'b': case 'B': selectTool('box'); break;
+                case 'f': case 'F': selectTool('spawner'); break;
+                case 'r': case 'R': selectTool('receiver'); break;
+                case 'd': case 'D': selectTool('diverter'); break;
+                case ' ':
+                    e.preventDefault();
+                    btnPlay.click();
+                    break;
+                case 's': case 'S':
+                    if (!e.ctrlKey && !e.metaKey) {
+                        e.preventDefault(); // 阻止浏览器默认保存行为
+                        saveLayout();
+                        btnSave.textContent = '✅ 已保存';
+                        setTimeout(() => btnSave.innerHTML = '💾 保存', 1500);
+                    }
+                    break;
+            }
+        });
+
+        // --- 导出/导入 ---
+        btnExport.addEventListener('click', () => {
+            const data = { grid, spawners, version: 2, exportedAt: new Date().toISOString() };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `logistics-layout-${Date.now()}.json`;
+            a.click();
+            // 延迟释放 URL，确保浏览器有足够时间完成下载
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            btnExport.textContent = '✅ 已导出';
+            setTimeout(() => btnExport.innerHTML = '📤 导出 JSON', 1500);
+        });
+        btnImport.addEventListener('click', () => importFile.click());
+        importFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+                    if (data.grid) {
+                        pushUndo();
+                        grid = data.grid;
+                        if (data.spawners) spawners = data.spawners;
+                        autoSave();
+                        if (!isRunning) draw();
+                        btnImport.textContent = '✅ 已导入';
+                    } else {
+                        btnImport.textContent = '❌ 格式错误';
+                    }
+                } catch(err) {
+                    btnImport.textContent = '❌ 解析失败';
+                }
+                setTimeout(() => btnImport.innerHTML = '📥 导入 JSON', 1500);
+            };
+            reader.readAsText(file);
+            importFile.value = ''; // 重置，允许重复导入同一文件
+        });
+
+        // --- 热力图开关 ---
+        btnHeatmap.addEventListener('click', () => {
+            showHeatMap = !showHeatMap;
+            btnHeatmap.innerHTML = showHeatMap
+                ? '🗺️ 拥堵热力图: <span class="text-green-600 font-bold">开</span>'
+                : '🗺️ 拥堵热力图: 关';
+            btnHeatmap.classList.toggle('bg-orange-50', showHeatMap);
+            btnHeatmap.classList.toggle('border-orange-300', showHeatMap);
+            if (!isRunning) draw();
+        });
+
+        // --- 右键查看格子属性 ---
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            // 移除已有的 tooltip
+            if (tooltip) { tooltip.remove(); tooltip = null; }
+            const { x: gx, y: gy } = getGridPos(e);
+            if (gx < 0 || gx >= GRID_W || gy < 0 || gy >= GRID_H) return;
+            const cell = grid[gy][gx];
+            const spawner = spawners.find(s => s.x === gx && s.y === gy);
+            const boxHere = boxes.find(b => {
+                const vx = Math.round(b.x + (b.nextX - b.x) * b.progress);
+                const vy = Math.round(b.y + (b.nextY - b.y) * b.progress);
+                return vx === gx && vy === gy;
+            });
+
+            let info = `<b>格子 (${gx}, ${gy})</b><br>`;
+            if (isConveyor(cell)) {
+                const dirNames = { 1: '→ 右', 2: '↓ 下', 3: '← 左', 4: '↑ 上' };
+                info += `输送带: ${dirNames[cell.dir] || '未知'}<br>`;
+                info += `速度: ${cell.speed} m/min<br>`;
+                info += `移载时间: ${(cell.transferTime || 0).toFixed(1)}s`;
+            } else if (isDiverter(cell)) {
+                const dirNames = { 1: '→', 2: '↓', 3: '←', 4: '↑' };
+                info += `🔀 分流器: ${dirNames[cell.dir1]}|${dirNames[cell.dir2]}<br>`;
+                info += `速度: ${cell.speed} m/min<br>`;
+                info += `已分流: ${cell.counter || 0} 个`;
+            } else if (isReceiver(cell)) {
+                info += `📥 收货站<br>已收: ${cell.collected || 0} 个`;
+            } else {
+                info += `空地`;
+            }
+            if (spawner) info += `<br>🏭 发货机 (${(spawner.interval/1000).toFixed(1)}s)`;
+            if (boxHere) info += `<br>📦 货物 #${boxHere.id}`;
+            const heat = heatData[gy][gx];
+            if (heat > 0) info += `<br>🔥 拥堵: ${heat.toFixed(1)}s`;
+
+            tooltip = document.createElement('div');
+            tooltip.innerHTML = info;
+            tooltip.style.cssText = `
+                position: fixed; left: ${e.clientX + 12}px; top: ${e.clientY + 12}px;
+                background: rgba(15,23,42,0.95); color: #e2e8f0; padding: 8px 12px;
+                border-radius: 8px; font-size: 12px; line-height: 1.6;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100;
+                pointer-events: none; border: 1px solid rgba(255,255,255,0.1);
+            `;
+            document.body.appendChild(tooltip);
+            setTimeout(() => { if (tooltip) { tooltip.remove(); tooltip = null; } }, 3000);
+        });
+
+        // 自动加载上次保存的布局
+        if (loadLayout()) {
+            console.log('已自动恢复上次布局');
+        }
+
+        // 初始绘制一次画面
+        draw();
+    </script>
+</body>
+</html>
