@@ -29,7 +29,7 @@ export class State extends EventEmitter {
     this.deliveredCount = 0;
 
     // 建造参数
-    this.currentTool = 'conveyor-1';
+    this.currentTool = 'select';
     this.buildLength = 1;
     this.buildSpeed = 60;
     this.buildInterval = 1;
@@ -44,6 +44,8 @@ export class State extends EventEmitter {
     this.hoverY = -1;
 
     // 显示热力图
+    this.spaceHeld = false;
+
     this.showHeatMap = false;
 
     // 撤销历史

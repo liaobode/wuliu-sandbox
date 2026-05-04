@@ -13,56 +13,147 @@ export class CanvasInteraction {
     this.state = state;
     this.renderer = renderer;
     this.isMouseDown = false;
+    this.isPanning = false;
+    this.isSelectPanning = false;
+    this.isSpacePanning = false;
+    this._lastPanPos = { x: 0, y: 0 };
 
     this._bindEvents();
+    this._updateCursor();
+    this.state.on('tool:select', () => this._updateCursor());
+    this.state.on('space:down', () => this._updateCursor());
+    this.state.on('space:up', () => this._updateCursor());
   }
 
   _bindEvents() {
     this.canvas.addEventListener('mousedown', (e) => this._onMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
-    this.canvas.addEventListener('mouseup', () => this._onMouseUp());
+    this.canvas.addEventListener('mouseup', (e) => this._onMouseUp(e));
     this.canvas.addEventListener('mouseleave', () => this._onMouseLeave());
     this.canvas.addEventListener('contextmenu', (e) => this._onContextMenu(e));
+    this.canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
+  }
+
+  _getCanvasCoords(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   _getGridPos(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const scaleX = this.canvas.width / rect.width;
-    const scaleY = this.canvas.height / rect.height;
-    const x = Math.floor(((e.clientX - rect.left) * scaleX) / CELL_SIZE);
-    const y = Math.floor(((e.clientY - rect.top) * scaleY) / CELL_SIZE);
-    return { x, y };
+    const { x, y } = this._getCanvasCoords(e);
+    const world = this.renderer.screenToWorld(x, y);
+    return {
+      x: Math.floor(world.x / CELL_SIZE),
+      y: Math.floor(world.y / CELL_SIZE)
+    };
   }
 
   _onMouseDown(e) {
+    // 中键平移
+    if (e.button === 1) {
+      e.preventDefault();
+      this.isPanning = true;
+      this._lastPanPos = this._getCanvasCoords(e);
+      return;
+    }
+
+    // 选择模式下左键拖拽平移
+    if (e.button === 0 && this.state.currentTool === 'select') {
+      this.isSelectPanning = true;
+      this._lastPanPos = this._getCanvasCoords(e);
+      return;
+    }
+
+    // 空格 + 左键拖拽平移（任意模式）
+    if (e.button === 0 && this.state.spaceHeld) {
+      this.isSpacePanning = true;
+      this.state._spaceDragged = false;
+      this._lastPanPos = this._getCanvasCoords(e);
+      this.canvas.style.cursor = 'grabbing';
+      return;
+    }
+
     this.isMouseDown = true;
     const { x, y } = this._getGridPos(e);
     this._handleInteract(x, y);
   }
 
   _onMouseMove(e) {
-    const { x, y } = this._getGridPos(e);
-    const changed = x !== this.state.hoverX || y !== this.state.hoverY;
-    this.state.hoverX = x;
-    this.state.hoverY = y;
+    const { x, y } = this._getCanvasCoords(e);
+
+    // 平移（中键 / 选择模式左键拖拽 / 空格+左键拖拽）
+    if (this.isPanning || this.isSelectPanning || this.isSpacePanning) {
+      const dx = x - this._lastPanPos.x;
+      const dy = y - this._lastPanPos.y;
+      this._lastPanPos = { x, y };
+      if (dx !== 0 || dy !== 0) {
+        this.renderer.panBy(dx, dy);
+        this.renderer.draw();
+        if (this.isSpacePanning) this.state._spaceDragged = true;
+      }
+      return;
+    }
+
+    const world = this.renderer.screenToWorld(x, y);
+    const gx = Math.floor(world.x / CELL_SIZE);
+    const gy = Math.floor(world.y / CELL_SIZE);
+    const changed = gx !== this.state.hoverX || gy !== this.state.hoverY;
+    this.state.hoverX = gx;
+    this.state.hoverY = gy;
 
     if (this.isMouseDown) {
-      this._handleInteract(x, y);
+      this._handleInteract(gx, gy);
     } else if (!this.state.isRunning && changed) {
       this.renderer.draw();
     }
   }
 
-  _onMouseUp() {
+  _onMouseUp(e) {
+    if (e.button === 1) {
+      this.isPanning = false;
+      return;
+    }
+    if (this.isSelectPanning) {
+      this.isSelectPanning = false;
+      return;
+    }
+    if (this.isSpacePanning) {
+      this.isSpacePanning = false;
+      this._updateCursor();
+      return;
+    }
     this.isMouseDown = false;
   }
 
   _onMouseLeave() {
     this.isMouseDown = false;
+    this.isPanning = false;
+    this.isSelectPanning = false;
+    this.isSpacePanning = false;
     this.state.hoverX = -1;
     this.state.hoverY = -1;
     if (!this.state.isRunning) {
       this.renderer.draw();
+    }
+  }
+
+  _onWheel(e) {
+    e.preventDefault();
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const factor = 1 + Math.abs(e.deltaY) * 0.002;
+    this.renderer.zoomAt(sx, sy, e.deltaY > 0 ? 1 / factor : factor);
+    this.renderer.draw();
+  }
+
+  _updateCursor() {
+    if (this.state.spaceHeld) {
+      this.canvas.style.cursor = 'grab';
+    } else if (this.state.currentTool === 'select') {
+      this.canvas.style.cursor = 'default';
+    } else {
+      this.canvas.style.cursor = 'crosshair';
     }
   }
 
@@ -75,6 +166,8 @@ export class CanvasInteraction {
     if (gx < 0 || gx >= GRID_W || gy < 0 || gy >= GRID_H) return;
 
     const tool = this.state.currentTool;
+
+    if (tool === 'select') return;
 
     if (tool.startsWith('conveyor-')) {
       this._placeConveyor(gx, gy, tool);

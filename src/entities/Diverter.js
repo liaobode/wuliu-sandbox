@@ -23,22 +23,55 @@ export class Diverter extends Entity {
   static render(ctx, x, y, cell, options = {}) {
     const px = x * CELL_SIZE;
     const py = y * CELL_SIZE;
+    const cx = px + CELL_SIZE / 2;
+    const cy = py + CELL_SIZE / 2;
 
-    ctx.fillStyle = COLORS.DIVERTER_OUTER;
-    ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-
-    ctx.fillStyle = COLORS.DIVERTER_INNER;
-    ctx.fillRect(px + 5, py + 5, CELL_SIZE - 10, CELL_SIZE - 10);
-
-    // 画两个方向箭头
     ctx.save();
+
+    // 外框投影
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+    ctx.shadowBlur = 3;
+    ctx.shadowOffsetY = 1;
+
+    const outerGrad = ctx.createLinearGradient(px, py, px, py + CELL_SIZE);
+    outerGrad.addColorStop(0, COLORS.DIVERTER_OUTER_TOP);
+    outerGrad.addColorStop(1, COLORS.DIVERTER_OUTER_BOTTOM);
+    ctx.fillStyle = outerGrad;
+    ctx.beginPath();
+    ctx.roundRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4, 4);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // 内面板渐变
+    const innerGrad = ctx.createLinearGradient(px + 5, py + 5, px + 5, py + CELL_SIZE - 5);
+    innerGrad.addColorStop(0, COLORS.DIVERTER_INNER_TOP);
+    innerGrad.addColorStop(1, COLORS.DIVERTER_INNER_BOTTOM);
+    ctx.fillStyle = innerGrad;
+    ctx.beginPath();
+    ctx.roundRect(px + 5, py + 5, CELL_SIZE - 10, CELL_SIZE - 10, 3);
+    ctx.fill();
+
+    // 方向箭头
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-    const cx = px + CELL_SIZE / 2;
-    const cy = py + CELL_SIZE / 2;
-    ctx.fillText(DIRECTION_ARROWS[cell.dir1] + '|' + DIRECTION_ARROWS[cell.dir2], cx, cy);
+
+    const arrowText = DIRECTION_ARROWS[cell.dir1] + ' | ' + DIRECTION_ARROWS[cell.dir2];
+    const tw = ctx.measureText(arrowText).width;
+
+    // 箭头背景 pill
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.beginPath();
+    ctx.roundRect(cx - tw / 2 - 5, cy - 9, tw + 10, 18, 9);
+    ctx.fill();
+
+    // 箭头文字
+    ctx.fillStyle = COLORS.DIVERTER_ARROW;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 1;
+    ctx.fillText(arrowText, cx, cy);
+
     ctx.restore();
   }
 }

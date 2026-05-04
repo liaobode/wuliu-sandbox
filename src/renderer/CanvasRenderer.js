@@ -12,19 +12,31 @@ export class CanvasRenderer {
     this.ctx = canvas.getContext('2d');
     this.state = state;
 
-    // 初始化画布尺寸
-    this.canvas.width = GRID_W * CELL_SIZE;
-    this.canvas.height = GRID_H * CELL_SIZE;
+    // 世界逻辑尺寸（网格总像素）
+    this._logicalWidth = GRID_W * CELL_SIZE;
+    this._logicalHeight = GRID_H * CELL_SIZE;
+    // HiDPI
+    this._dpr = window.devicePixelRatio || 1;
 
-    // 实体注册表
+    // 视口状态
+    this.view = { panX: 0, panY: 0, zoom: 1 };
+    this._initialFit = false;
+
+    this._setupCanvas();
+
     this.entityRegistry = createDefaultEntityRegistry();
-
-    // 绑定事件
     this._bindEvents();
   }
 
+  _setupCanvas() {
+    const rect = this.canvas.getBoundingClientRect();
+    const w = rect.width || this._logicalWidth;
+    const h = rect.height || this._logicalHeight;
+    this.canvas.width = w * this._dpr;
+    this.canvas.height = h * this._dpr;
+  }
+
   _bindEvents() {
-    // 状态变化时自动重绘
     this.state.on('state:grid-change', () => this.draw());
     this.state.on('state:box-spawn', () => this.draw());
     this.state.on('state:box-remove', () => this.draw());
@@ -34,63 +46,240 @@ export class CanvasRenderer {
   }
 
   /**
-   * 调整画布大小
+   * 处理窗口/DPR 变化
    */
-  resize() {
-    const container = this.canvas.parentElement;
-    const maxW = container.clientWidth - 64;
-    const maxH = container.clientHeight - 64;
-    const scale = Math.min(maxW / this.canvas.width, maxH / this.canvas.height, 1);
-    this.canvas.style.width = (this.canvas.width * scale) + 'px';
-    this.canvas.style.height = (this.canvas.height * scale) + 'px';
+  handleResize() {
+    const newDpr = window.devicePixelRatio || 1;
+    if (newDpr !== this._dpr) {
+      this._dpr = newDpr;
+    }
+    this.resize();
+    this.draw();
   }
 
   /**
-   * 主渲染函数
+   * 调整画布尺寸填满容器
    */
+  resize() {
+    const container = this.canvas.parentElement;
+    const cssW = container.clientWidth - 64;
+    const cssH = container.clientHeight - 64;
+    this.canvas.style.width = cssW + 'px';
+    this.canvas.style.height = cssH + 'px';
+    this.canvas.width = cssW * this._dpr;
+    this.canvas.height = cssH * this._dpr;
+
+    if (!this._initialFit) {
+      this._initialFit = true;
+      this.fitToScreen();
+    }
+  }
+
+  /**
+   * 获取视口逻辑宽高
+   */
+  getViewportWidth() {
+    return this.canvas.width / this._dpr;
+  }
+  getViewportHeight() {
+    return this.canvas.height / this._dpr;
+  }
+
+  // ========== 坐标转换 ==========
+
+  screenToWorld(sx, sy) {
+    return {
+      x: (sx - this.view.panX) / this.view.zoom,
+      y: (sy - this.view.panY) / this.view.zoom
+    };
+  }
+
+  worldToScreen(wx, wy) {
+    return {
+      x: wx * this.view.zoom + this.view.panX,
+      y: wy * this.view.zoom + this.view.panY
+    };
+  }
+
+  // ========== 视口操作 ==========
+
+  zoomAt(sx, sy, factor) {
+    const world = this.screenToWorld(sx, sy);
+    const newZoom = Math.max(COLORS.ZOOM_MIN, Math.min(COLORS.ZOOM_MAX, this.view.zoom * factor));
+    if (newZoom === this.view.zoom) return;
+    this.view.zoom = newZoom;
+    this.view.panX = sx - world.x * newZoom;
+    this.view.panY = sy - world.y * newZoom;
+    this._notify();
+  }
+
+  panBy(dx, dy) {
+    this.view.panX += dx;
+    this.view.panY += dy;
+    this._notify();
+  }
+
+  fitToScreen() {
+    const vw = this.getViewportWidth();
+    const vh = this.getViewportHeight();
+    const margin = 40;
+    const availW = vw - margin * 2;
+    const availH = vh - margin * 2;
+    if (availW <= 0 || availH <= 0) return;
+    const fitZ = Math.min(availW / this._logicalWidth, availH / this._logicalHeight, 1.5);
+    this.view.zoom = fitZ;
+    this.view.panX = (vw - this._logicalWidth * fitZ) / 2;
+    this.view.panY = (vh - this._logicalHeight * fitZ) / 2;
+    this._notify();
+  }
+
+  fitToContent() {
+    const vw = this.getViewportWidth();
+    const vh = this.getViewportHeight();
+
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    let hasItems = false;
+
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (this.state.grid[y][x] !== 0) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+          hasItems = true;
+        }
+      }
+    }
+    for (const s of this.state.spawners) {
+      if (s.x < minX) minX = s.x;
+      if (s.y < minY) minY = s.y;
+      if (s.x > maxX) maxX = s.x;
+      if (s.y > maxY) maxY = s.y;
+      hasItems = true;
+    }
+
+    if (!hasItems) {
+      this.fitToScreen();
+      return;
+    }
+
+    const margin = 3;
+    const left = (minX - margin) * CELL_SIZE;
+    const top = (minY - margin) * CELL_SIZE;
+    const right = (maxX + margin + 1) * CELL_SIZE;
+    const bottom = (maxY + margin + 1) * CELL_SIZE;
+    const areaW = right - left;
+    const areaH = bottom - top;
+    const fitZ = Math.min(vw / areaW, vh / areaH, 2);
+    this.view.zoom = Math.max(0.1, fitZ);
+    this.view.panX = vw / 2 - ((left + right) / 2) * this.view.zoom;
+    this.view.panY = vh / 2 - ((top + bottom) / 2) * this.view.zoom;
+    this._notify();
+  }
+
+  resetView() {
+    this._initialFit = false;
+    this.resize();
+  }
+
+  _notify() {
+    this.state.emit('view:change', { ...this.view });
+  }
+
+  // ========== 渲染 ==========
+
   draw() {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const ctx = this.ctx;
+    const vw = this.getViewportWidth();
+    const vh = this.getViewportHeight();
+
+    // 1. DPR 基础变换
+    ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+    ctx.clearRect(0, 0, vw, vh);
+
+    // 2. 暗色背景填充整个视口
+    ctx.fillStyle = COLORS.CANVAS_BG;
+    ctx.fillRect(0, 0, vw, vh);
+
+    // 3. 应用视口变换
+    ctx.save();
+    ctx.translate(this.view.panX, this.view.panY);
+    ctx.scale(this.view.zoom, this.view.zoom);
+
+    // 4. 世界空间内容
     this._drawGrid();
     this._drawEntities();
     this._drawSpawners();
     this._drawBoxes();
     this._drawHeatmap();
     this._drawPreview();
+
+    // 5. 恢复回屏幕空间
+    ctx.restore();
+
+    // 6. 屏幕空间 HUD
+    this.drawHUD();
   }
 
   _drawGrid() {
-    this.ctx.strokeStyle = COLORS.GRID_LINE;
-    this.ctx.lineWidth = 1;
+    const ctx = this.ctx;
+    const vw = this.getViewportWidth();
+    const vh = this.getViewportHeight();
+    const zoom = this.view.zoom;
 
-    for (let y = 0; y <= GRID_H; y++) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, y * CELL_SIZE);
-      this.ctx.lineTo(this.canvas.width, y * CELL_SIZE);
-      this.ctx.stroke();
+    // 计算可见世界区域的范围
+    const topLeft = this.screenToWorld(0, 0);
+    const bottomRight = this.screenToWorld(vw, vh);
+    const startX = Math.floor(topLeft.x / CELL_SIZE);
+    const startY = Math.floor(topLeft.y / CELL_SIZE);
+    const endX = Math.ceil(bottomRight.x / CELL_SIZE);
+    const endY = Math.ceil(bottomRight.y / CELL_SIZE);
+
+    // 根据 zoom 决定网格密度
+    let minorStep, majorStep;
+    if (zoom < 0.3) {
+      minorStep = 8; majorStep = 16;
+    } else if (zoom < 0.6) {
+      minorStep = 4; majorStep = 8;
+    } else if (zoom < 2.0) {
+      minorStep = 1; majorStep = 4;
+    } else {
+      minorStep = 1; majorStep = 1;
     }
 
-    for (let x = 0; x <= GRID_W; x++) {
-      this.ctx.beginPath();
-      this.ctx.moveTo(x * CELL_SIZE, 0);
-      this.ctx.lineTo(x * CELL_SIZE, this.canvas.height);
-      this.ctx.stroke();
+    // 细网格线
+    ctx.strokeStyle = COLORS.GRID_LINE;
+    ctx.lineWidth = Math.max(0.2, 0.4 / zoom);
+    for (let x = startX; x <= endX; x += minorStep) {
+      ctx.beginPath();
+      ctx.moveTo(x * CELL_SIZE, startY * CELL_SIZE);
+      ctx.lineTo(x * CELL_SIZE, endY * CELL_SIZE);
+      ctx.stroke();
+    }
+    for (let y = startY; y <= endY; y += minorStep) {
+      ctx.beginPath();
+      ctx.moveTo(startX * CELL_SIZE, y * CELL_SIZE);
+      ctx.lineTo(endX * CELL_SIZE, y * CELL_SIZE);
+      ctx.stroke();
     }
 
-    // 网格坐标标签
-    this.ctx.save();
-    this.ctx.font = '9px monospace';
-    this.ctx.fillStyle = COLORS.GRID_LABEL;
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'top';
-    for (let x = 0; x < GRID_W; x++) {
-      this.ctx.fillText(x, x * CELL_SIZE + CELL_SIZE / 2, 2);
+    // 主网格线
+    ctx.strokeStyle = COLORS.GRID_MAJOR_LINE;
+    ctx.lineWidth = Math.max(0.3, 0.8 / zoom);
+    for (let x = startX; x <= endX; x += majorStep) {
+      ctx.beginPath();
+      ctx.moveTo(x * CELL_SIZE, startY * CELL_SIZE);
+      ctx.lineTo(x * CELL_SIZE, endY * CELL_SIZE);
+      ctx.stroke();
     }
-    this.ctx.textAlign = 'left';
-    this.ctx.textBaseline = 'middle';
-    for (let y = 0; y < GRID_H; y++) {
-      this.ctx.fillText(y, 3, y * CELL_SIZE + CELL_SIZE / 2);
+    for (let y = startY; y <= endY; y += majorStep) {
+      ctx.beginPath();
+      ctx.moveTo(startX * CELL_SIZE, y * CELL_SIZE);
+      ctx.lineTo(endX * CELL_SIZE, y * CELL_SIZE);
+      ctx.stroke();
     }
-    this.ctx.restore();
   }
 
   _drawEntities() {
@@ -105,8 +294,9 @@ export class CanvasRenderer {
   }
 
   _drawSpawners() {
+    const opts = { simTime: this.state.simTime };
     for (const spawner of this.state.spawners) {
-      Spawner.render(this.ctx, spawner);
+      Spawner.render(this.ctx, spawner, opts);
     }
   }
 
@@ -134,9 +324,8 @@ export class CanvasRenderer {
           const v = this.state.heatData[y][x];
           if (v > 0) {
             const intensity = Math.min(v / maxHeat, 1);
-            const r = intensity < 0.5 ? Math.round(255 * intensity * 2) : 255;
-            const g = intensity < 0.5 ? 255 : Math.round(255 * (1 - (intensity - 0.5) * 2));
-            this.ctx.fillStyle = `rgba(${r}, ${g}, 0, ${COLORS.HEATMAP_ALPHA})`;
+            const hue = (1 - intensity) * 240;
+            this.ctx.fillStyle = `hsla(${hue}, 80%, ${50 + intensity * 10}%, ${COLORS.HEATMAP_ALPHA})`;
             this.ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
 
             if (v >= 0.5) {
@@ -166,6 +355,7 @@ export class CanvasRenderer {
     const px = this.state.hoverX * CELL_SIZE;
     const py = this.state.hoverY * CELL_SIZE;
     const tool = this.state.currentTool;
+    const cellSize = CELL_SIZE;
 
     this.ctx.save();
     this.ctx.globalAlpha = 0.35;
@@ -180,38 +370,49 @@ export class CanvasRenderer {
         else if (dir === 4) ty -= i;
 
         if (tx >= 0 && tx < GRID_W && ty >= 0 && ty < GRID_H) {
+          const cx = tx * cellSize, cy = ty * cellSize;
           this.ctx.fillStyle = COLORS.PREVIEW_CONVEYOR;
-          this.ctx.fillRect(tx * CELL_SIZE + 2, ty * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+          this.ctx.beginPath();
+          this.ctx.roundRect(cx + 2, cy + 2, cellSize - 4, cellSize - 4, 3);
+          this.ctx.fill();
           const arrows = ['→', '↓', '←', '↑'];
           this.ctx.globalAlpha = 0.7;
           this.ctx.fillStyle = '#fff';
           this.ctx.font = 'bold 20px sans-serif';
           this.ctx.textAlign = 'center';
           this.ctx.textBaseline = 'middle';
-          this.ctx.fillText(arrows[dir - 1], tx * CELL_SIZE + CELL_SIZE / 2, ty * CELL_SIZE + CELL_SIZE / 2);
+          this.ctx.fillText(arrows[dir - 1], cx + cellSize / 2, cy + cellSize / 2);
           this.ctx.globalAlpha = 0.35;
         }
       }
     } else if (tool === 'receiver') {
       this.ctx.fillStyle = COLORS.PREVIEW_RECEIVER;
-      this.ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+      this.ctx.beginPath();
+      this.ctx.roundRect(px + 2, py + 2, cellSize - 4, cellSize - 4, 4);
+      this.ctx.fill();
     } else if (tool === 'spawner') {
       this.ctx.fillStyle = COLORS.PREVIEW_CONVEYOR;
-      this.ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+      this.ctx.beginPath();
+      this.ctx.roundRect(px + 2, py + 2, cellSize - 4, cellSize - 4, 4);
+      this.ctx.fill();
     } else if (tool === 'box') {
-      const BOX_OFFSET = (CELL_SIZE - 28) / 2;
+      const boxOff = (cellSize - 28) / 2;
       this.ctx.fillStyle = COLORS.PREVIEW_BOX;
-      this.ctx.fillRect(px + BOX_OFFSET, py + BOX_OFFSET, 28, 28);
+      this.ctx.beginPath();
+      this.ctx.roundRect(px + boxOff, py + boxOff, 28, 28, 3);
+      this.ctx.fill();
     } else if (tool === 'eraser') {
       this.ctx.fillStyle = COLORS.PREVIEW_ERASER;
-      this.ctx.fillRect(px + 2, py + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-      this.ctx.strokeStyle = COLORS.PREVIEW_ERASER;
+      this.ctx.beginPath();
+      this.ctx.roundRect(px + 2, py + 2, cellSize - 4, cellSize - 4, 4);
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#fff';
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
       this.ctx.moveTo(px + 12, py + 12);
-      this.ctx.lineTo(px + CELL_SIZE - 12, py + CELL_SIZE - 12);
-      this.ctx.moveTo(px + CELL_SIZE - 12, py + 12);
-      this.ctx.lineTo(px + 12, py + CELL_SIZE - 12);
+      this.ctx.lineTo(px + cellSize - 12, py + cellSize - 12);
+      this.ctx.moveTo(px + cellSize - 12, py + 12);
+      this.ctx.lineTo(px + 12, py + cellSize - 12);
       this.ctx.stroke();
     }
 
@@ -219,10 +420,12 @@ export class CanvasRenderer {
   }
 
   /**
-   * 绘制 HUD 覆盖层
+   * 绘制 HUD 覆盖层（屏幕空间）
    */
   drawHUD() {
     if (!this.state.isRunning && this.state.activeTimeMs === 0) return;
+
+    const vw = this.getViewportWidth();
 
     const padding = 10;
     const timeSec = (this.state.activeTimeMs / 1000);
@@ -232,26 +435,34 @@ export class CanvasRenderer {
       `⏱️ ${timeSec.toFixed(1)}s  |  📊 ${rate.toFixed(2)}/s  |  ⚡${this.state.speed.toFixed(1)}x`
     ];
 
-    this.ctx.save();
-    this.ctx.font = 'bold 12px monospace';
-    const maxW = Math.max(...lines.map(l => this.ctx.measureText(l).width));
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = 'bold 12px monospace';
+    const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
     const boxH = lines.length * 18 + padding;
     const boxW = maxW + padding * 2;
-    const bx = this.canvas.width - boxW - 8;
+    const bx = vw - boxW - 8;
     const by = 8;
 
-    this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    this.ctx.beginPath();
-    this.ctx.roundRect(bx, by, boxW, boxH, 6);
-    this.ctx.fill();
+    const hudGrad = ctx.createLinearGradient(bx, by, bx, by + boxH);
+    hudGrad.addColorStop(0, 'rgba(0, 0, 0, 0.65)');
+    hudGrad.addColorStop(1, 'rgba(0, 0, 0, 0.75)');
+    ctx.fillStyle = hudGrad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 6);
+    ctx.fill();
 
-    this.ctx.fillStyle = '#e5e7eb';
-    this.ctx.textAlign = 'left';
-    this.ctx.textBaseline = 'top';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#cbd5e1';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     lines.forEach((line, i) => {
-      this.ctx.fillText(line, bx + padding, by + padding / 2 + i * 18);
+      ctx.fillText(line, bx + padding, by + padding / 2 + i * 18);
     });
 
-    this.ctx.restore();
+    ctx.restore();
   }
 }

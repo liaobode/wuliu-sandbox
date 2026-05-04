@@ -10,6 +10,7 @@ export class KeyboardShortcuts {
 
   _bindEvents() {
     document.addEventListener('keydown', (e) => this._onKeyDown(e));
+    document.addEventListener('keyup', (e) => this._onKeyUp(e));
 
     // 帮助面板关闭按钮
     const helpBackdrop = document.getElementById('help-backdrop');
@@ -49,10 +50,11 @@ export class KeyboardShortcuts {
       return;
     }
 
-    // ESC 关闭帮助面板
+    // ESC 关闭面板并回到观察模式
     if (e.key === 'Escape') {
       this._closeHelp();
       this._closeStats();
+      this._selectTool('select');
       return;
     }
 
@@ -96,8 +98,12 @@ export class KeyboardShortcuts {
         this._selectTool('diverter');
         break;
       case ' ':
-        e.preventDefault();
-        this.state.emit('ui:toggle-play');
+        if (!this.state.spaceHeld) {
+          e.preventDefault();
+          this.state.spaceHeld = true;
+          this.state._spaceDragged = false;
+          this.state.emit('space:down');
+        }
         break;
       case 's':
       case 'S':
@@ -106,6 +112,16 @@ export class KeyboardShortcuts {
           this.state.emit('ui:save');
         }
         break;
+    }
+  }
+
+  _onKeyUp(e) {
+    if (e.key === ' ') {
+      if (!this.state._spaceDragged) {
+        this.state.emit('ui:toggle-play');
+      }
+      this.state.spaceHeld = false;
+      this.state.emit('space:up');
     }
   }
 

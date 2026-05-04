@@ -1,21 +1,15 @@
 import { SAVE_KEY } from '../core/constants.js';
 
-/**
- * 数据持久化模块
- */
 export class Storage {
-  constructor(state) {
-    this.state = state;
+  constructor(store) {
+    this.store = store;
   }
 
-  /**
-   * 保存布局到 localStorage
-   */
   save() {
     try {
       const data = {
-        grid: this.state.grid,
-        spawners: this.state.spawners,
+        grid: this.store.state.grid,
+        spawners: this.store.state.spawners,
         version: 2
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -26,15 +20,12 @@ export class Storage {
     }
   }
 
-  /**
-   * 从 localStorage 加载布局
-   */
   load() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       const data = JSON.parse(raw);
-      this.state.importData(data);
+      this.store.importData(data);
       return true;
     } catch (e) {
       console.warn('加载失败:', e);
@@ -42,11 +33,8 @@ export class Storage {
     }
   }
 
-  /**
-   * 导出为 JSON 文件
-   */
   exportToFile() {
-    const data = this.state.exportData();
+    const data = this.store.exportData();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -56,9 +44,6 @@ export class Storage {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  /**
-   * 从 JSON 文件导入
-   */
   importFromFile(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -66,8 +51,8 @@ export class Storage {
         try {
           const data = JSON.parse(ev.target.result);
           if (data.grid) {
-            this.state.pushUndo();
-            this.state.importData(data);
+            this.store.pushUndo();
+            this.store.importData(data);
             resolve(true);
           } else {
             reject(new Error('格式错误'));

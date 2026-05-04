@@ -1,43 +1,34 @@
 import { GRID_W, GRID_H } from '../core/constants.js';
 import { Conveyor } from '../entities/Conveyor.js';
+import { ChainConveyor } from '../entities/ChainConveyor.js';
+import { ChainTransfer } from '../entities/ChainTransfer.js';
 import { Diverter } from '../entities/Diverter.js';
 import { Receiver } from '../entities/Receiver.js';
 import { Box } from '../entities/Box.js';
+import { Pallet } from '../entities/Pallet.js';
 
-/**
- * 物理引擎基类
- */
 export class PhysicsEngine {
-  /**
-   * 更新物理状态
-   * @param {State} state - 游戏状态
-   * @param {number} dt - 时间增量（毫秒）
-   */
   update(state, dt) {
     throw new Error('PhysicsEngine.update() must be implemented');
   }
 }
 
-// 辅助函数
-function isConveyor(cell) {
-  return Conveyor.isType(cell);
+function isBeltConveyor(cell) { return Conveyor.isType(cell); }
+function isChainConveyor(cell) { return ChainConveyor.isType(cell); }
+function isChainTransfer(cell) { return ChainTransfer.isType(cell); }
+function isAnyConveyor(cell) { return isBeltConveyor(cell) || isChainConveyor(cell) || isChainTransfer(cell); }
+function isDiverter(cell) { return Diverter.isType(cell); }
+function isReceiver(cell) { return Receiver.isType(cell); }
+
+function isCompatibleConveyor(cell, cargo) {
+  if (cargo.cargoType === 'pallet') return isChainConveyor(cell) || isChainTransfer(cell);
+  return isBeltConveyor(cell);
 }
 
-function isDiverter(cell) {
-  return Diverter.isType(cell);
-}
-
-function isReceiver(cell) {
-  return Receiver.isType(cell);
-}
-
-/**
- * 默认物理引擎实现
- */
 export class DefaultPhysics extends PhysicsEngine {
   update(state, dt) {
     this._updateSpawners(state, dt);
-    this._updateBoxes(state, dt);
+    this._updateCargo(state, dt);
   }
 
   _updateSpawners(state, dt) {
@@ -46,24 +37,31 @@ export class DefaultPhysics extends PhysicsEngine {
       const currentInterval = s.interval || 1000;
 
       if (s.timer >= currentInterval) {
-        const hasBox = state.boxes.some(b =>
+        const hasCargo = state.boxes.some(b =>
           (b.x === s.x && b.y === s.y) ||
           (b.nextX === s.x && b.nextY === s.y)
         );
 
-        if (!hasBox && isConveyor(state.getCell(s.x, s.y))) {
-          const cell = state.getCell(s.x, s.y);
-          state.addBox(Box.create({ x: s.x, y: s.y, lastDir: cell.dir }));
+        const cell = state.getCell(s.x, s.y);
+        // 根据脚下传送带类型决定货物类型
+        const isBelt = isBeltConveyor(cell);
+        const isChain = isChainConveyor(cell);
+
+        if (!hasCargo && (isBelt || isChain)) {
+          if (isBelt) {
+            state.addBox(Box.create({ x: s.x, y: s.y, lastDir: cell.dir, w: state.boxWidth, h: state.boxHeight }));
+          } else {
+            state.addBox(Pallet.create({ x: s.x, y: s.y, lastDir: cell.dir, w: state.palletWidth, h: state.palletHeight }));
+          }
           s.timer = 0;
-        } else if (hasBox) {
+        } else if (hasCargo) {
           s.timer = currentInterval;
         }
       }
     }
   }
 
-  _updateBoxes(state, dt) {
-    // 构建占位地图用于 O(1) 碰撞检测
+  _updateCargo(state, dt) {
     const visualMap = new Map();
     const targetMap = new Map();
 
@@ -80,11 +78,11 @@ export class DefaultPhysics extends PhysicsEngine {
       let b = state.boxes[i];
 
       const currentCell = state.getCell(b.x, b.y);
-      const beltSpeed = (currentCell !== 0 && currentCell.speed) ? currentCell.speed : 60;
+      const defaultSpeed = b.cargoType === 'pallet' ? 12 : 60;
+      const beltSpeed = (currentCell !== 0 && currentCell.speed) ? currentCell.speed : defaultSpeed;
       const speedCellsPerSec = beltSpeed / 60;
       const progressDelta = (speedCellsPerSec * state.speed * dt) / 1000;
 
-      // 处理移载倒计时
       if (b.transferWait > 0) {
         b.transferWait -= state.speed * dt;
         if (b.transferWait < 0) b.transferWait = 0;
@@ -95,16 +93,32 @@ export class DefaultPhysics extends PhysicsEngine {
         let dir = 0;
         let cellTransferTime = 0;
 
-        if (isConveyor(currentCell)) {
-          dir = currentCell.dir;
-          cellTransferTime = currentCell.transferTime || 0;
+        if (isCompatibleConveyor(currentCell, b)) {
+          // 链条机无移载机时只能直行，不能转弯
+          if (isChainConveyor(currentCell) && b.lastDir !== 0 && b.lastDir !== currentCell.dir) {
+            dir = 0;
+          } else {
+            dir = currentCell.dir;
+            cellTransferTime = currentCell.transferTime || 0;
+          }
         } else if (isDiverter(currentCell)) {
-          // 分流器：根据 counter 决定方向，但只在货物首次进入时记录
           dir = currentCell.counter % 2 === 0 ? currentCell.dir1 : currentCell.dir2;
           cellTransferTime = currentCell.transferTime || 0;
-          // 只在首次进入分流器时记录，避免重复设置
-          if (!b.diverterCell) {
-            b.diverterCell = currentCell;
+          if (!b.diverterCell) b.diverterCell = currentCell;
+        }
+
+        if (dir !== 0) {
+          // 链条机：提前检查下一格，不同方向且非移载机则禁止前进
+          if (isChainConveyor(currentCell)) {
+            let nx = b.x, ny = b.y;
+            if (dir === 1) nx++;
+            else if (dir === 2) ny++;
+            else if (dir === 3) nx--;
+            else if (dir === 4) ny--;
+            const nextCell = state.getCell(nx, ny);
+            if (nextCell !== 0 && isChainConveyor(nextCell) && nextCell.dir !== dir) {
+              dir = 0;
+            }
           }
         }
 
@@ -127,7 +141,6 @@ export class DefaultPhysics extends PhysicsEngine {
         let blocked = false;
         const targetKey = b.nextX + ',' + b.nextY;
 
-        // 冲突检测
         const competitors = targetMap.get(targetKey) || [];
         for (const other of competitors) {
           if (other.id === b.id) continue;
@@ -143,7 +156,6 @@ export class DefaultPhysics extends PhysicsEngine {
         if (!blocked) {
           b.progress += progressDelta;
         } else {
-          // 记录拥堵数据
           const bvx = Math.round(b.x + (b.nextX - b.x) * b.progress);
           const bvy = Math.round(b.y + (b.nextY - b.y) * b.progress);
           if (bvx >= 0 && bvx < GRID_W && bvy >= 0 && bvy < GRID_H) {
@@ -157,18 +169,17 @@ export class DefaultPhysics extends PhysicsEngine {
           b.y = b.nextY;
           b.progress = 0;
 
-          // 货物成功离开分流器，递增 counter
           if (b.diverterCell) {
             b.diverterCell.counter++;
             b.diverterCell = null;
           }
 
-          // 检查是否出界或到达收货站
           let removed = false;
           if (b.x < 0 || b.x >= GRID_W || b.y < 0 || b.y >= GRID_H) {
             removed = true;
           } else {
             const arrivedCell = state.getCell(b.x, b.y);
+            // 到达收货站或空单元格 → 移除
             if (arrivedCell === 0 || isReceiver(arrivedCell)) {
               if (isReceiver(arrivedCell)) {
                 arrivedCell.collected = (arrivedCell.collected || 0) + 1;
@@ -180,7 +191,6 @@ export class DefaultPhysics extends PhysicsEngine {
           if (removed) {
             state.boxes.splice(i, 1);
             state.deliveredCount++;
-            state.emit('state:box-deliver', { box: b });
           }
         }
       }
